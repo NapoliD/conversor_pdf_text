@@ -51,8 +51,6 @@
         const downloadContainer = document.getElementById('download-container');
         const downloadLink = document.getElementById('download-link');
         const errorMessage = document.getElementById('error-message');
-        let fileId = null;
-        let progressInterval = null;
 
         // Prevent default drag behaviors
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -90,11 +88,17 @@
         function handleDrop(e) {
             const dt = e.dataTransfer;
             const files = dt.files;
-            handleFiles({ target: { files: files } });
+            handleFiles(files);
         }
 
-        function handleFiles(e) {
-            const file = e.target.files[0];
+        function handleFiles(files) {
+            if (files instanceof FileList) {
+                files = files;
+            } else if (files.target) {
+                files = files.target.files;
+            }
+
+            const file = files[0];
             if (file && file.type === 'application/pdf') {
                 uploadFile(file);
             } else {
@@ -108,16 +112,10 @@
 
             // Reset UI
             errorMessage.classList.add('hidden');
-            progressContainer.classList.remove('hidden');
             downloadContainer.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
             progressBar.style.width = '0%';
-            progressText.textContent = 'Procesando...';
-
-            // Clear any existing progress polling
-            if (progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
-            }
+            progressText.textContent = 'Iniciando conversión...';
 
             fetch('/upload', {
                 method: 'POST',
@@ -126,59 +124,22 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    fileId = data.file_id;
-                    // Start polling for progress updates
-                    progressInterval = setInterval(checkProgress, 1000);
+                    downloadLink.href = `/download/${data.filename}`;
+                    downloadContainer.classList.remove('hidden');
+                    progressContainer.classList.add('hidden');
                 } else {
-                    throw new Error(data.error || 'Error en la conversión');
+                    throw new Error(data.error || 'Error al convertir el archivo');
                 }
             })
             .catch(error => {
                 showError(error.message);
+                progressContainer.classList.add('hidden');
             });
-        }
-
-        function checkProgress() {
-            if (!fileId) return;
-            
-            fetch(`/progress/${fileId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    
-                    // Update progress bar and text
-                    progressBar.style.width = `${data.progress}%`;
-                    progressText.textContent = data.message || 'Procesando...';
-                    
-                    // If conversion is complete (progress is 100%)
-                    if (data.progress >= 100) {
-                        clearInterval(progressInterval);
-                        progressInterval = null;
-                        
-                        // Show download button
-                        downloadContainer.classList.remove('hidden');
-                        downloadLink.href = `/download/${fileId.split('_')[0]}.txt`;
-                    }
-                })
-                .catch(error => {
-                    clearInterval(progressInterval);
-                    progressInterval = null;
-                    showError(error.message);
-                });
         }
 
         function showError(message) {
             errorMessage.textContent = message;
             errorMessage.classList.remove('hidden');
-            progressContainer.classList.add('hidden');
-            downloadContainer.classList.add('hidden');
-            
-            if (progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
-            }
         }
     </script>
 </body>
