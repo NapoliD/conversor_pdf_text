@@ -3,10 +3,10 @@ from werkzeug.utils import secure_filename
 import os
 import io
 import threading
-from pdf_to_text import convert_pdf_to_text, PDFConverter
+from conversor_pdf_text.pdf_to_text import convert_pdf_to_text, PDFConverter
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = '../uploads'
+app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Ensure upload folder exists
@@ -45,7 +45,7 @@ def upload_file():
         filename = secure_filename(file.filename)
         file_id = f"{filename}_{threading.get_ident()}"
         pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        txt_path = os.path.join(app.config['UPLOAD_FOLDER'], f'{filename[:-4]}.txt')
+        txt_path = os.path.join(app.config['UPLOAD_FOLDER'], 'CV.txt')
         
         file.save(pdf_path)
         
@@ -72,7 +72,7 @@ def upload_file():
             return jsonify({
                 'success': True,
                 'message': 'File converted successfully',
-                'filename': f'{filename[:-4]}.txt',
+                'filename': 'CV.txt',
                 'file_id': file_id
             })
         else:
@@ -100,16 +100,9 @@ def download_file(filename):
         return jsonify({'error': 'File not found'}), 404
     
     try:
-        # Open the file in binary mode and read its contents
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
-        
-        # Delete the file after reading its contents
-        os.remove(file_path)
-        
-        # Create response with the file content
+        # Create response with the file directly
         response = send_file(
-            io.BytesIO(file_content),
+            file_path,
             mimetype='text/plain',
             as_attachment=True,
             download_name=filename
