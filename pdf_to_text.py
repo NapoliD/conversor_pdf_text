@@ -121,6 +121,12 @@ class PDFConverter:
                     
                     # Extract text
                     text = page.get_text()
+                    if not text.strip():  # If no text found, try OCR on the page
+                        pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        processed_image = self.preprocess_image(img)
+                        text = pytesseract.image_to_string(processed_image, lang=self.lang)
+                    
                     complete_text.append(f"\n=== Page {page_num + 1} Text ===\n{text}")
                     
                     # Extract images
@@ -182,6 +188,12 @@ class PDFConverter:
                 if len(scanned_text.strip()) > len(text_content.strip()):
                     text_content = scanned_text
             
+            # Ensure we have some content before saving
+            if not text_content.strip():
+                print("No text content was extracted from the PDF")
+                return False
+            
+            # Save the text content with proper encoding
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text_content)
                 
@@ -195,8 +207,12 @@ class PDFConverter:
 def convert_pdf_to_text(pdf_path: str, output_path: str, lang: str = 'spa',
                        progress_callback=None, dpi: int = 300) -> bool:
     """Utility function to convert PDF to text with progress tracking"""
-    converter = PDFConverter(pdf_path, lang, progress_callback, dpi)
-    return converter.save_to_txt(output_path)
+    try:
+        converter = PDFConverter(pdf_path, lang, progress_callback, dpi)
+        return converter.save_to_txt(output_path)
+    except Exception as e:
+        print(f"Error in PDF conversion: {str(e)}")
+        return False
 
 if __name__ == '__main__':
     # Example usage with progress tracking
