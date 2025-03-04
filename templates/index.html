@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convertidor PDF a Texto</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-xl w-full bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">Convertidor PDF a Texto</h1>
+        
+        <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors duration-200">
+            <input type="file" id="file-input" class="hidden" accept=".pdf">
+            <div class="space-y-4">
+                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <div class="text-gray-600">
+                    <p class="font-medium">Arrastra y suelta tu archivo PDF aquí</p>
+                    <p class="text-sm">o haz clic para seleccionar</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="progress-container" class="hidden mt-6">
+            <div class="w-full bg-gray-200 rounded-full h-2.5">
+                <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+            </div>
+            <p id="progress-text" class="text-sm text-gray-600 mt-2 text-center">Procesando...</p>
+        </div>
+
+        <div id="download-container" class="hidden mt-6 text-center">
+            <a id="download-link" href="#" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Descargar archivo de texto
+            </a>
+        </div>
+
+        <div id="error-message" class="hidden mt-4 p-4 text-red-700 bg-red-100 rounded-lg"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const downloadContainer = document.getElementById('download-container');
+        const downloadLink = document.getElementById('download-link');
+        const errorMessage = document.getElementById('error-message');
+        let fileId = null;
+        let progressInterval = null;
+
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // Highlight drop zone when file is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('border-blue-500');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('border-blue-500');
+        }
+
+        // Handle dropped files
+        dropZone.addEventListener('drop', handleDrop, false);
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFiles);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles({ target: { files: files } });
+        }
+
+        function handleFiles(e) {
+            const file = e.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                uploadFile(file);
+            } else {
+                showError('Por favor, selecciona un archivo PDF válido.');
+            }
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Reset UI
+            errorMessage.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
+            downloadContainer.classList.add('hidden');
+            progressBar.style.width = '0%';
+            progressText.textContent = 'Procesando...';
+
+            // Clear any existing progress polling
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fileId = data.file_id;
+                    // Start polling for progress updates
+                    progressInterval = setInterval(checkProgress, 1000);
+                } else {
+                    throw new Error(data.error || 'Error en la conversión');
+                }
+            })
+            .catch(error => {
+                showError(error.message);
+            });
+        }
+
+        function checkProgress() {
+            if (!fileId) return;
+            
+            fetch(`/progress/${fileId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    // Update progress bar and text
+                    progressBar.style.width = `${data.progress}%`;
+                    progressText.textContent = data.message || 'Procesando...';
+                    
+                    // If conversion is complete (progress is 100%)
+                    if (data.progress >= 100) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        
+                        // Show download button
+                        downloadContainer.classList.remove('hidden');
+                        downloadLink.href = `/download/${fileId.split('_')[0]}.txt`;
+                    }
+                })
+                .catch(error => {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                    showError(error.message);
+                });
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+            progressContainer.classList.add('hidden');
+            downloadContainer.classList.add('hidden');
+            
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>
