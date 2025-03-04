@@ -1,29 +1,16 @@
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
+from pdf_to_text import convert_pdf_to_text
 import os
-import io
-import threading
-from conversor_pdf_text.pdf_to_text import convert_pdf_to_text, PDFConverter
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Ensure upload folder exists
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Configure upload folder
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-# Store conversion progress
-conversion_progress = {}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() == 'pdf'
-
-def progress_callback(file_id, progress, message):
-    """Update progress for a specific file conversion"""
-    conversion_progress[file_id] = {
-        'progress': progress,
-        'message': message
-    }
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 @app.route('/')
 def index():
@@ -35,83 +22,49 @@ def upload_file():
         return jsonify({'error': 'No file part'}), 400
     
     file = request.files['file']
+    
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
     
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'File must be a PDF'}), 400
     
     try:
+        # Save the uploaded PDF
         filename = secure_filename(file.filename)
-        file_id = f"{filename}_{threading.get_ident()}"
         pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        txt_path = os.path.join(app.config['UPLOAD_FOLDER'], 'CV.txt')
-        
         file.save(pdf_path)
         
-        # Initialize progress tracking
-        conversion_progress[file_id] = {
-            'progress': 0,
-            'message': 'Iniciando conversión...'
-        }
+        # Convert PDF to text
+        output_filename = os.path.splitext(filename)[0] + '.txt'
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
         
-        # Create callback function for this specific conversion
-        def file_progress_callback(progress, message):
-            progress_callback(file_id, progress, message)
+        def progress_callback(progress, message):
+            print(f"Progress: {progress}%, {message}")
         
-        # Convert PDF to text with progress tracking
-        success = convert_pdf_to_text(
-            pdf_path, 
-            txt_path, 
-            lang='spa',  # Spanish language for OCR
-            progress_callback=file_progress_callback,
-            dpi=300  # Higher DPI for better quality
-        )
+        success = convert_pdf_to_text(pdf_path, output_path, progress_callback)
         
         if success:
             return jsonify({
                 'success': True,
-                'message': 'File converted successfully',
-                'filename': 'CV.txt',
-                'file_id': file_id
+                'filename': output_filename
             })
         else:
-            return jsonify({'error': 'Failed to convert file'}), 500
+            return jsonify({'error': 'Failed to convert PDF'}), 500
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    finally:
-        # Clean up PDF file
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
-
-@app.route('/progress/<file_id>')
-def get_progress(file_id):
-    """Get the current progress of a file conversion"""
-    if file_id in conversion_progress:
-        return jsonify(conversion_progress[file_id])
-    return jsonify({'error': 'File ID not found'}), 404
 
 @app.route('/download/<filename>')
 def download_file(filename):
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
-    
     try:
-        # Create response with the file directly
-        response = send_file(
-            file_path,
-            mimetype='text/plain',
+        return send_file(
+            os.path.join(app.config['UPLOAD_FOLDER'], filename),
             as_attachment=True,
             download_name=filename
         )
-        
-        return response
-        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 404
 
 if __name__ == '__main__':
     app.run(debug=True)
